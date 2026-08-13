@@ -16,39 +16,39 @@
 ```mermaid
 flowchart TD
     subgraph Trigger ["⏰ Stage 1: Trigger & Config"]
-        T1[📅 Schedule Cron<br/>Mon-Fri 8:00 AM] --> CFG[⚙️ Candidate CV Profile<br/>Skills, Roles & Weights]
-        T2[⚡ Manual Trigger<br/>On-Demand Scan] --> CFG
+        T1["📅 Schedule Cron (Mon-Fri 8:00 AM)"] --> CFG["⚙️ Candidate CV Profile (Skills, Roles & Weights)"]
+        T2["⚡ Manual Trigger (On-Demand Scan)"] --> CFG
     end
 
     subgraph Scraping ["🌐 Stage 2: Web Scraping & Ingestion"]
-        CFG --> S1[📡 RemoteOK API<br/>Desktop Browser Headers]
-        CFG --> S2[📰 WeWorkRemotely RSS<br/>Remote Tech Feeds]
-        S1 --> NORM[🧹 Data Normalization<br/>Clean HTML, Parse Salary & Tags]
+        CFG --> S1["📡 RemoteOK API (Browser Headers)"]
+        CFG --> S2["📰 WeWorkRemotely RSS (Tech Feeds)"]
+        S1 --> NORM["🧹 Data Normalization (Clean HTML, Parse Salary & Tags)"]
         S2 --> NORM
     end
 
     subgraph Deduplication ["🛡️ Stage 3: Database & Deduplication"]
-        NORM --> GSD[📊 Google Sheets<br/>Fetch Existing Applications]
-        GSD --> DEDUP{🔍 URL Exists<br/>in Database?}
-        DEDUP -- "Yes (Duplicate)" --> DROP[🚫 Drop Posting]
-        DEDUP -- "No (Fresh Job)" --> GATE[✅ Batch New Jobs]
+        NORM --> GSD["📊 Google Sheets (Fetch Existing Applications)"]
+        GSD --> DEDUP{"🔍 URL Exists in Database?"}
+        DEDUP -->|"Yes (Duplicate)"| DROP["🚫 Drop Posting"]
+        DEDUP -->|"No (Fresh Job)"| GATE["✅ Batch New Jobs"]
     end
 
     subgraph Scoring ["🧠 Stage 4: AI CV Matching & Scoring"]
-        GATE --> AI[🎯 Multi-Vector Fit Engine<br/>• Primary Skills (40%)<br/>• Role Alignment (25%)<br/>• Secondary Skills (20%)<br/>• Remote Synergy (15%)]
-        AI --> PITCH[✍️ Generate 1-Sentence<br/>Tailored Application Pitch]
-        PITCH --> FLTR{⚖️ Match Score<br/>>= Threshold?}
-        FLTR -- "Score < 60%" --> SKIP[📁 Archive / Ignore]
-        FLTR -- "Score >= 60%" --> SYNC
+        GATE --> AI["🎯 Multi-Vector Fit Engine<br/>• Primary Skills: 40%<br/>• Role Alignment: 25%<br/>• Secondary Skills: 20%<br/>• Remote Synergy: 15%"]
+        AI --> PITCH["✍️ Generate 1-Sentence Tailored Pitch"]
+        PITCH --> FLTR{"⚖️ Match Score >= Threshold?"}
+        FLTR -->|"Score < 60%"| SKIP["📁 Archive / Ignore"]
+        FLTR -->|"Score >= 60%"| SYNC
     end
 
-    subgraph Storage ["📊 Stage 5: Google Sheets Sync"]
-        SYNC[📝 Append Row to Google Sheet<br/>Date, Role, Company, Score, Pitch, Status]
+    subgraph Storage ["📊 Stage 5: Google Sheets Live Sync"]
+        SYNC["📝 Append Row to Google Sheet<br/>Date, Role, Company, Score, Pitch, Status"]
     end
 
     subgraph Notification ["📫 Stage 6: Formatted Email Digest"]
-        SYNC --> COMP[🎨 Build Responsive HTML Email<br/>Score Badges, Tech Pills & Stats]
-        COMP --> MAIL[🚀 Send Daily Digest Alert<br/>Candidate Inbox via SMTP / Gmail]
+        SYNC --> COMP["🎨 Build Responsive HTML Email<br/>Score Badges, Tech Pills & Stats"]
+        COMP --> MAIL["🚀 Send Daily Digest Alert<br/>Candidate Inbox via SMTP / Gmail"]
     end
 
     style Trigger fill:#f5f3ff,stroke:#8b5cf6,stroke-width:2px;
