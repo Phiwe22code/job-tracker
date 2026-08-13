@@ -80,7 +80,6 @@ flowchart TD
 
 The CV matching algorithm calculates a deterministic **Match Quality Score (0–100%)** across 4 weighted dimensions:
 
-$$\text{Match Score} = S_{\text{primary}} (40\%) + S_{\text{role}} (25\%) + S_{\text{secondary}} (20\%) + S_{\text{synergy}} (15\%)$$
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
