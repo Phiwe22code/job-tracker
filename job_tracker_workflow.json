@@ -1,0 +1,556 @@
+{
+  "name": "Automated Job Tracker & CV Matching Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger-001",
+      "name": "Schedule Trigger (Mon-Fri 8AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "manual-trigger-002",
+      "name": "Manual Trigger (On-Demand)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        220,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Define Candidate Profile and CV Matching Parameters\nconst candidateProfile = {\n  fullName: \"Candidate Name\",\n  email: \"candidate@example.com\",\n  targetRoles: [\n    \"Full Stack Developer\",\n    \"Software Engineer\",\n    \"Backend Developer\",\n    \"Frontend Developer\",\n    \"AI / Automation Engineer\"\n  ],\n  experienceYears: 3,\n  primarySkills: [\n    \"JavaScript\",\n    \"TypeScript\",\n    \"React\",\n    \"Next.js\",\n    \"Node.js\",\n    \"Python\",\n    \"PostgreSQL\",\n    \"REST APIs\",\n    \"n8n\",\n    \"Docker\",\n    \"TailwindCSS\",\n    \"Git\"\n  ],\n  secondarySkills: [\n    \"GraphQL\",\n    \"AWS\",\n    \"FastAPI\",\n    \"LangChain\",\n    \"OpenAI API\",\n    \"MongoDB\",\n    \"Redis\",\n    \"CI/CD\"\n  ],\n  preferredLocations: [\"Remote\", \"Worldwide\", \"US\", \"Europe\", \"South Africa\"],\n  minScoreThreshold: 60,\n  highPriorityThreshold: 80\n};\n\nreturn [{\n  json: {\n    candidateProfile,\n    executionDate: new Date().toISOString().split('T')[0],\n    executionTimestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "set-candidate-profile-003",
+      "name": "Set Candidate Profile & CV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://remoteok.com/api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "fetch-remoteok-004",
+      "name": "Fetch RemoteOK Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        740,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://weworkremotely.com/categories/remote-programming-jobs.rss",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "application/xml, text/xml, */*"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "fetch-wwr-005",
+      "name": "Fetch WeWorkRemotely RSS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        740,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalizes raw data from RemoteOK API & WeWorkRemotely RSS\nconst items = $input.all();\nconst normalizedJobs = [];\nconst seenUrls = new Set();\n\nfor (const item of items) {\n  const data = item.json;\n  \n  // 1. Handle RemoteOK array response\n  if (Array.isArray(data)) {\n    for (const job of data) {\n      if (!job.position || !job.url || job.legal) continue;\n      \n      const applyUrl = job.url.startsWith('http') ? job.url : `https://remoteok.com${job.url}`;\n      if (seenUrls.has(applyUrl)) continue;\n      seenUrls.add(applyUrl);\n\n      let salary = 'Not Disclosed';\n      if (job.salary_min && job.salary_max) {\n        salary = `$${Number(job.salary_min).toLocaleString()} - $${Number(job.salary_max).toLocaleString()}`;\n      } else if (job.salary) {\n        salary = job.salary;\n      }\n\n      const cleanDesc = (job.description || '')\n        .replace(/<[^>]*>?/gm, ' ')\n        .replace(/\\s+/g, ' ')\n        .trim()\n        .slice(0, 1200);\n\n      normalizedJobs.push({\n        jobId: String(job.id || applyUrl),\n        source: 'RemoteOK',\n        role: job.position || 'Software Engineer',\n        company: job.company || 'Confidential',\n        location: job.location || 'Remote (Worldwide)',\n        salary: salary,\n        tags: Array.isArray(job.tags) ? job.tags.filter(t => t.length > 1) : [],\n        applyUrl: applyUrl,\n        description: cleanDesc,\n        dateFound: new Date().toISOString().split('T')[0]\n      });\n    }\n  }\n  \n  // 2. Handle WeWorkRemotely RSS / Object response\n  if (data.rss && data.rss.channel && data.rss.channel.item) {\n    const rssItems = Array.isArray(data.rss.channel.item) ? data.rss.channel.item : [data.rss.channel.item];\n    for (const rJob of rssItems) {\n      const applyUrl = rJob.link || rJob.guid;\n      if (!applyUrl || seenUrls.has(applyUrl)) continue;\n      seenUrls.add(applyUrl);\n\n      const titleParts = (rJob.title || '').split(': ');\n      const company = titleParts.length > 1 ? titleParts[0].trim() : 'WeWorkRemotely Partner';\n      const role = titleParts.length > 1 ? titleParts.slice(1).join(': ').trim() : rJob.title || 'Developer';\n\n      const cleanDesc = (rJob.description || '')\n        .replace(/<[^>]*>?/gm, ' ')\n        .replace(/\\s+/g, ' ')\n        .trim()\n        .slice(0, 1200);\n\n      normalizedJobs.push({\n        jobId: String(applyUrl),\n        source: 'WeWorkRemotely',\n        role: role,\n        company: company,\n        location: 'Remote',\n        salary: 'Competitive / Not Disclosed',\n        tags: ['Remote', 'Developer', 'Engineering'],\n        applyUrl: applyUrl,\n        description: cleanDesc,\n        dateFound: new Date().toISOString().split('T')[0]\n      });\n    }\n  }\n}\n\n// Limit to recent 25 jobs per run to optimize LLM and rate limits\nconst slicedJobs = normalizedJobs.slice(0, 25);\nreturn slicedJobs.map(job => ({ json: job }));"
+      },
+      "id": "parse-standardize-jobs-006",
+      "name": "Parse & Standardize Job Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "sheetName": "Job Applications",
+        "options": {
+          "returnAllMatches": true
+        }
+      },
+      "id": "fetch-existing-sheets-007",
+      "name": "Fetch Existing Google Sheet Rows",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1240,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Deduplicates scraped jobs against existing records in Google Sheets\nconst scrapedJobs = $('Parse & Standardize Job Fields').all().map(i => i.json);\nlet existingUrls = new Set();\n\ntry {\n  const sheetRows = $('Fetch Existing Google Sheet Rows').all().map(i => i.json);\n  sheetRows.forEach(row => {\n    const url = row['Apply URL'] || row['applyUrl'] || row['URL'] || row['Job URL'];\n    if (url) {\n      existingUrls.add(url.trim().toLowerCase());\n    }\n  });\n} catch (err) {\n  // Sheet might be empty on initial setup\n  existingUrls = new Set();\n}\n\nconst freshJobs = scrapedJobs.filter(job => {\n  if (!job.applyUrl) return false;\n  const normalizedUrl = job.applyUrl.trim().toLowerCase();\n  return !existingUrls.has(normalizedUrl);\n});\n\nreturn freshJobs.map(job => ({ json: job }));"
+      },
+      "id": "deduplication-engine-008",
+      "name": "Deduplication Engine",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1460,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-has-items",
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-new-jobs-009",
+      "name": "Check If New Jobs Exist",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// AI CV Matching & Scoring Algorithm (0 - 100)\n// Evaluates job requirement synergy with candidate profile\n\nconst items = $input.all();\nconst candidateProfile = $('Set Candidate Profile & CV').first().json.candidateProfile;\n\nconst scoredJobs = items.map(item => {\n  const job = item.json;\n  const roleText = (job.role || '').toLowerCase();\n  const descText = (job.description || '').toLowerCase();\n  const tagsText = (job.tags || []).join(' ').toLowerCase();\n  const fullText = `${roleText} ${tagsText} ${descText}`;\n\n  // 1. Primary Skills Match (Weight: 40%)\n  const matchedPrimary = candidateProfile.primarySkills.filter(skill => \n    fullText.includes(skill.toLowerCase())\n  );\n  const primaryScore = Math.min(40, (matchedPrimary.length / Math.min(candidateProfile.primarySkills.length, 6)) * 40);\n\n  // 2. Secondary Skills Match (Weight: 20%)\n  const matchedSecondary = candidateProfile.secondarySkills.filter(skill => \n    fullText.includes(skill.toLowerCase())\n  );\n  const secondaryScore = Math.min(20, (matchedSecondary.length / Math.min(candidateProfile.secondarySkills.length, 4)) * 20);\n\n  // 3. Role Title Alignment (Weight: 25%)\n  let roleScore = 0;\n  for (const targetRole of candidateProfile.targetRoles) {\n    const targetWords = targetRole.toLowerCase().split(' ');\n    const matchesAllWords = targetWords.every(w => roleText.includes(w));\n    if (matchesAllWords) {\n      roleScore = 25;\n      break;\n    } else if (targetWords.some(w => roleText.includes(w))) {\n      roleScore = Math.max(roleScore, 15);\n    }\n  }\n\n  // 4. Remote & Experience Synergy (Weight: 15%)\n  let synergyScore = 10;\n  if (job.location.toLowerCase().includes('remote') || job.location.toLowerCase().includes('worldwide')) {\n    synergyScore += 5;\n  }\n\n  const totalScore = Math.min(100, Math.round(primaryScore + secondaryScore + roleScore + synergyScore));\n  const allMatchedSkills = [...matchedPrimary, ...matchedSecondary];\n  \n  // Determine Match Tier\n  let matchTier = \"Moderate Fit (50-69%)\";\n  let statusColor = \"#eab308\";\n  if (totalScore >= candidateProfile.highPriorityThreshold) {\n    matchTier = \"🔥 High Priority Match (80-100%)\";\n    statusColor = \"#10b981\";\n  } else if (totalScore >= candidateProfile.minScoreThreshold) {\n    matchTier = \"⚡ Good Fit (60-79%)\";\n    statusColor = \"#06b6d4\";\n  } else {\n    matchTier = \"Low Fit (<60%)\";\n    statusColor = \"#ef4444\";\n  }\n\n  // Generate Tailored 1-Sentence Pitch\n  const topSkillsPreview = allMatchedSkills.slice(0, 3).join(', ') || \"Full-Stack & Cloud Architecture\";\n  const tailoredPitch = `Excited to apply my ${candidateProfile.experienceYears}+ years of hands-on expertise in ${topSkillsPreview} to accelerate ${job.company}'s mission on the ${job.role} team.`;\n\n  const fitReasoning = `Matched ${allMatchedSkills.length} key competencies (${allMatchedSkills.slice(0, 4).join(', ')}). Title synergy: ${roleScore}/25 pts. Remote compatibility confirmed.`;\n\n  return {\n    json: {\n      ...job,\n      matchScore: totalScore,\n      matchTier: matchTier,\n      statusColor: statusColor,\n      matchedSkills: allMatchedSkills,\n      missingSkills: candidateProfile.primarySkills.filter(s => !allMatchedSkills.includes(s)).slice(0, 3),\n      tailoredPitch: tailoredPitch,\n      fitReasoning: fitReasoning,\n      applicationStatus: \"To Apply\"\n    }\n  };\n});\n\n// Sort descending by match score\nscoredJobs.sort((a, b) => b.json.matchScore - a.json.matchScore);\n\nreturn scoredJobs;"
+      },
+      "id": "ai-cv-matcher-010",
+      "name": "AI CV Matching & Fit Scoring",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-score-threshold",
+              "leftValue": "={{ $json.matchScore }}",
+              "rightValue": "={{ $('Set Candidate Profile & CV').first().json.candidateProfile.minScoreThreshold }}",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "filter-min-threshold-011",
+      "name": "Filter Qualified Matches",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        2140,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetName": "Job Applications",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date Found": "={{ $json.dateFound }}",
+            "Company": "={{ $json.company }}",
+            "Role": "={{ $json.role }}",
+            "Match Score %": "={{ $json.matchScore }}%",
+            "Match Tier": "={{ $json.matchTier }}",
+            "Tech Stack": "={{ $json.tags.join(', ') }}",
+            "Location": "={{ $json.location }}",
+            "Salary Range": "={{ $json.salary }}",
+            "Apply URL": "={{ $json.applyUrl }}",
+            "Tailored Pitch": "={{ $json.tailoredPitch }}",
+            "Fit Reasoning": "={{ $json.fitReasoning }}",
+            "Application Status": "={{ $json.applicationStatus }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sync-google-sheets-012",
+      "name": "Sync to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2380,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compiles modern, responsive HTML Daily Job Digest Email\nconst matchedJobs = $input.all().map(i => i.json);\nconst candidate = $('Set Candidate Profile & CV').first().json.candidateProfile;\nconst dateStr = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' });\n\nif (matchedJobs.length === 0) {\n  return [{\n    json: {\n      subject: `🎯 Daily Job Digest: No New High-Fit Matches (${dateStr})`,\n      htmlBody: `<div style=\"font-family: Arial, sans-serif; padding: 24px;\"><h3>Daily Job Digest</h3><p>No new job postings met the ${candidate.minScoreThreshold}% match threshold today. Next scan runs tomorrow at 8:00 AM.</p></div>`,\n      totalMatches: 0\n    }\n  }];\n}\n\nconst highPriorityCount = matchedJobs.filter(j => j.matchScore >= candidate.highPriorityThreshold).length;\nconst avgScore = Math.round(matchedJobs.reduce((acc, j) => acc + j.matchScore, 0) / matchedJobs.length);\n\nconst jobCardsHtml = matchedJobs.map((job, idx) => `\n  <div style=\"background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.04);\">\n    <div style=\"display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;\">\n      <div>\n        <span style=\"display: inline-block; background: ${job.statusColor}; color: #ffffff; font-weight: 700; font-size: 12px; padding: 4px 10px; border-radius: 9999px; text-transform: uppercase; margin-bottom: 8px;\">\n          ${job.matchScore}% Match &bull; ${job.matchTier}\n        </span>\n        <h2 style=\"margin: 0; font-size: 18px; color: #0f172a; font-weight: 700;\">${job.role}</h2>\n        <p style=\"margin: 4px 0 0 0; font-size: 14px; color: #475569; font-weight: 600;\">\n          🏢 ${job.company} &nbsp;&bull;&nbsp; 📍 ${job.location} &nbsp;&bull;&nbsp; 💰 ${job.salary}\n        </p>\n      </div>\n    </div>\n\n    <div style=\"margin: 14px 0; padding: 12px 16px; background: #f8fafc; border-left: 4px solid #3b82f6; border-radius: 4px;\">\n      <p style=\"margin: 0; font-size: 13px; color: #334155; font-style: italic;\">\n        <strong>Tailored Pitch:</strong> \"${job.tailoredPitch}\"\n      </p>\n      <p style=\"margin: 6px 0 0 0; font-size: 12px; color: #64748b;\">\n        <strong>Why it matches:</strong> ${job.fitReasoning}\n      </p>\n    </div>\n\n    <div style=\"margin-bottom: 16px;\">\n      <span style=\"font-size: 12px; color: #64748b; font-weight: 600; margin-right: 6px;\">Key Stack:</span>\n      ${(job.tags || []).slice(0, 6).map(t => `<span style=\"display: inline-block; background: #e0e7ff; color: #3730a3; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; margin-right: 4px; margin-bottom: 4px;\">${t}</span>`).join('')}\n    </div>\n\n    <a href=\"${job.applyUrl}\" target=\"_blank\" style=\"display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; font-size: 13px; font-weight: 700; padding: 10px 20px; border-radius: 6px;\">\n      Apply Now &rarr;\n    </a>\n  </div>\n`).join('');\n\nconst emailHtml = `\n<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n</head>\n<body style=\"margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;\">\n  <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color: #f1f5f9; padding: 30px 10px;\">\n    <tr>\n      <td align=\"center\">\n        <table width=\"640\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width: 640px; width: 100%;\">\n          <!-- Header -->\n          <tr>\n            <td style=\"background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 30px; border-radius: 16px 16px 0 0; text-align: left;\">\n              <h1 style=\"margin: 0; color: #ffffff; font-size: 22px; font-weight: 800; letter-spacing: -0.5px;\">🎯 Daily Job Match Digest</h1>\n              <p style=\"margin: 6px 0 0 0; color: #94a3b8; font-size: 14px;\">${dateStr} &bull; Curated for ${candidate.fullName}</p>\n            </td>\n          </tr>\n          <!-- Stats Bar -->\n          <tr>\n            <td style=\"background: #ffffff; padding: 16px 30px; border-bottom: 1px solid #e2e8f0;\">\n              <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                <tr>\n                  <td width=\"33%\" align=\"center\">\n                    <div style=\"font-size: 20px; font-weight: 800; color: #0f172a;\">${matchedJobs.length}</div>\n                    <div style=\"font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: 700;\">Total Matches</div>\n                  </td>\n                  <td width=\"33%\" align=\"center\" style=\"border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;\">\n                    <div style=\"font-size: 20px; font-weight: 800; color: #10b981;\">${highPriorityCount}</div>\n                    <div style=\"font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: 700;\">High Priority (80%+)</div>\n                  </td>\n                  <td width=\"33%\" align=\"center\">\n                    <div style=\"font-size: 20px; font-weight: 800; color: #2563eb;\">${avgScore}%</div>\n                    <div style=\"font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: 700;\">Avg Fit Score</div>\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n          <!-- Content -->\n          <tr>\n            <td style=\"background: #f8fafc; padding: 24px 30px; border-radius: 0 0 16px 16px;\">\n              ${jobCardsHtml}\n              \n              <p style=\"text-align: center; margin: 24px 0 0 0; font-size: 12px; color: #94a3b8;\">\n                ⚡ Automated by n8n Job Tracker &bull; All opportunities synced to your Google Sheet database\n              </p>\n            </td>\n          </tr>\n        </table>\n      </td>\n    </tr>\n  </table>\n</body>\n</html>\n`;\n\nreturn [{\n  json: {\n    toEmail: candidate.email,\n    subject: `🎯 Job Digest: ${matchedJobs.length} New High-Fit Roles Found (${dateStr})`,\n    htmlBody: emailHtml,\n    totalMatches: matchedJobs.length,\n    highPriorityMatches: highPriorityCount,\n    averageFitScore: avgScore\n  }\n}];"
+      },
+      "id": "format-email-digest-013",
+      "name": "Format HTML Email Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2620,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "notifications@jobtracker.ai",
+        "toEmail": "={{ $json.toEmail }}",
+        "subject": "={{ $json.subject }}",
+        "html": "={{ $json.htmlBody }}",
+        "options": {}
+      },
+      "id": "send-email-digest-014",
+      "name": "Send Email Digest Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2860,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 🟣 STAGE 1: TRIGGER & CANDIDATE PROFILE\n- **Automated Schedule**: Mon–Fri @ 08:00 AM Cron\n- **Manual Trigger**: Instant on-demand execution\n- **Profile Engine**: Stores candidate target roles, core skills, experience & fit thresholds",
+        "height": 320,
+        "width": 460,
+        "color": 6
+      },
+      "id": "sticky-stage-1",
+      "name": "Sticky Note - Stage 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        180,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 🔵 STAGE 2: MULTI-SOURCE WEB SCRAPING\n- **RemoteOK API**: Desktop browser headers & remote dev filters\n- **WeWorkRemotely RSS**: Real-time tech feed parsing\n- **Normalization Engine**: Cleans HTML, extracts salaries, tags, and standardizes payload",
+        "height": 380,
+        "width": 480,
+        "color": 4
+      },
+      "id": "sticky-stage-2",
+      "name": "Sticky Note - Stage 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        700,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 🟠 STAGE 3: DEDUPLICATION ENGINE\n- **Google Sheets Lookup**: Reads existing application history\n- **URL Hashing / Check**: Filters out already discovered postings\n- **Branch Control**: Proceeds only when fresh opportunities are found",
+        "height": 320,
+        "width": 580,
+        "color": 3
+      },
+      "id": "sticky-stage-3",
+      "name": "Sticky Note - Stage 3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1220,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 🟢 STAGE 4: AI CV MATCHING & SCORING\n- **Multi-Vector Scoring**: Primary Tech (40%), Secondary (20%), Role Title (25%), Synergy (15%)\n- **Fit Scoring (0-100)**: Categorizes jobs by priority tier\n- **AI Pitch Generator**: Generates 1-sentence tailored application pitch\n- **Threshold Gate**: Enforces minimum qualification filter",
+        "height": 320,
+        "width": 380,
+        "color": 5
+      },
+      "id": "sticky-stage-4",
+      "name": "Sticky Note - Stage 4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1860,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 🟡 STAGE 5: GOOGLE SHEETS LIVE SYNC\n- Appends qualified job opportunities to active database\n- Stores match score, tech stack, location, salary, tailored pitch & application status",
+        "height": 260,
+        "width": 200,
+        "color": 2
+      },
+      "id": "sticky-stage-5",
+      "name": "Sticky Note - Stage 5",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2320,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 🔴 STAGE 6: EMAIL DIGEST & ALERTS\n- **Responsive HTML Builder**: Luxury card-based email newsletter\n- **Executive Stats**: Total matches, High Priority count, Avg Score\n- **Instant Dispatch**: Sends direct application links to candidate inbox",
+        "height": 280,
+        "width": 460,
+        "color": 1
+      },
+      "id": "sticky-stage-6",
+      "name": "Sticky Note - Stage 6",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2560,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Mon-Fri 8AM)": {
+      "main": [
+        [
+          {
+            "node": "Set Candidate Profile & CV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger (On-Demand)": {
+      "main": [
+        [
+          {
+            "node": "Set Candidate Profile & CV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Candidate Profile & CV": {
+      "main": [
+        [
+          {
+            "node": "Fetch RemoteOK Jobs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch WeWorkRemotely RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch RemoteOK Jobs": {
+      "main": [
+        [
+          {
+            "node": "Parse & Standardize Job Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch WeWorkRemotely RSS": {
+      "main": [
+        [
+          {
+            "node": "Parse & Standardize Job Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Standardize Job Fields": {
+      "main": [
+        [
+          {
+            "node": "Fetch Existing Google Sheet Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Existing Google Sheet Rows": {
+      "main": [
+        [
+          {
+            "node": "Deduplication Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deduplication Engine": {
+      "main": [
+        [
+          {
+            "node": "Check If New Jobs Exist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If New Jobs Exist": {
+      "main": [
+        [
+          {
+            "node": "AI CV Matching & Fit Scoring",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI CV Matching & Fit Scoring": {
+      "main": [
+        [
+          {
+            "node": "Filter Qualified Matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Qualified Matches": {
+      "main": [
+        [
+          {
+            "node": "Sync to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Format HTML Email Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format HTML Email Digest": {
+      "main": [
+        [
+          {
+            "node": "Send Email Digest Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b6a8f102-1784-4b52-9c12-ef49d012478a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "38a4d467793d93bfb17fa832b35c02450539c07ecdbb196887556a31c4bca280"
+  },
+  "tags": [
+    {
+      "name": "Job Hunting",
+      "createdAt": "2026-08-13T00:00:00.000Z",
+      "updatedAt": "2026-08-13T00:00:00.000Z",
+      "id": "tag-job-hunting"
+    },
+    {
+      "name": "AI & Automation",
+      "createdAt": "2026-08-13T00:00:00.000Z",
+      "updatedAt": "2026-08-13T00:00:00.000Z",
+      "id": "tag-automation"
+    }
+  ]
+}
